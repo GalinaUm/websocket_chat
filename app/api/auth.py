@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import create_access_token, decode_token, hash_password, verify_password
 from app.db import get_db
 from app.models.user import User
 from app.schemas.user import Token, UserCreate, UserOut
@@ -42,3 +42,27 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 
     token = create_access_token(user.username)
     return Token(access_token=token)
+
+
+def get_current_user(
+        token: str = Depends(oauth2_scheme),
+        db: Session = Depends(get_db),
+) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    username = decode_token(token)
+    if username is None:
+        raise credentials_exception
+    user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+@router.get("/me", response_model=UserOut)
+def read_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
