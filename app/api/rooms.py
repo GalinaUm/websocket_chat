@@ -1,14 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
+from app.core.config import settings
 from app.db import get_db
 from app.models.message import Message
 from app.models.room import Room
 from app.models.user import User
 from app.schemas.message import MessageCreate, MessageOut
 from app.schemas.room import RoomCreate, RoomOut
+import json
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
@@ -44,7 +47,7 @@ def list_messages(room_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{room_id}/messages", response_model=MessageOut, status_code=status.HTTP_201_CREATED)
-def send_messages(
+async def send_messages(
         room_id: int,
         message_data: MessageCreate,
         db: Session = Depends(get_db),
@@ -61,4 +64,16 @@ def send_messages(
     db.add(message)
     db.commit()
     db.refresh(message)
+    channel = f"room:{room_id}"
+    redis = Redis.from_url(settings.redis_url, decode_responses=True, protocol=2)
+    await redis.publish(channel, json.dumps({
+        "type": "new_message",
+        "room_id": message.room_id,
+        "user_id": message.user_id,
+        "username": current_user.username,
+        "content": message.content,
+        "created_at": message.created_at.isoformat(),
+    }))
+    await redis.close()
+
     return message
