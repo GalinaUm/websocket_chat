@@ -22,3 +22,13 @@ class RoomMemberOut(BaseModel):
     id: int
     username: str
     online: bool
+
+
+class RoomRequestOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    username: str
+    status: str
+    created_at: datetime
