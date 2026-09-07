@@ -1,6 +1,8 @@
+from ast import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from redis.asyncio import Redis
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.auth import get_current_user
@@ -260,3 +262,56 @@ def reject_request(
     req.status = "rejected"
     db.commit()
     return {"detail": "rejected"}
+
+
+@router.delete("/{room_id}", status_code=status.HTTP_200_OK)
+def delete_room(
+        room_id: int,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    room = db.get(Room, room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if room.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Only room creator can delete")
+
+    db.execute(delete(Message).where(Message.room_id == room_id))
+    db.execute(delete(RoomMember).where(RoomMember.room_id == room.id))
+    db.execute(delete(RoomRequest).where(RoomRequest.room_id == room.id))
+    db.delete(room)
+    db.commit()
+    return {"detail": "room deleted"}
+
+
+@router.delete("/{room_id}/messages/{message_id}", status_code=status.HTTP_200_OK)
+async def delete_message(
+        room_id: int,
+        message_id: int,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    room = db.get(Room, room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    message = db.get(Message, message_id)
+    if message is None or message.room_id != room.id:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if message.user_id != current_user.id and room.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Only room creator can delete")
+
+    db.delete(message)
+    db.commit()
+
+    channel = f"room:{room_id}"
+    redis = Redis.from_url(settings.redis_url, decode_responses=True, protocol=2)
+    await redis.publish(channel, json.dumps({
+        "type": "message_delete",
+        "room_id": room_id,
+        "id": message_id,
+    }))
+    await redis.close()
+
+    return {"detail": "message deleted"}
