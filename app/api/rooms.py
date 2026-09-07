@@ -1,16 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.core.config import settings
 from app.db import get_db
+from app.models.room_member import RoomMember
 from app.models.message import Message
 from app.models.room import Room
 from app.models.user import User
 from app.schemas.message import MessageCreate, MessageOut
-from app.schemas.room import RoomCreate, RoomOut
+from app.schemas.room import RoomCreate, RoomOut, RoomMemberOut
 import json
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
@@ -22,8 +23,16 @@ def create_room(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
+    user_room_count = db.execute(
+        select(func.count(RoomMember.id)).where(RoomMember.user_id == current_user.id)
+    ).scalar_one()
+    if user_room_count >= settings.max_rooms_per_user:
+        raise HTTPException(status_code=400, detail=f"Limited to {settings.max_rooms_per_user} rooms")
     room = Room(name=room_data.name, created_by=current_user.id)
     db.add(room)
+    db.flush()
+
+    db.add(RoomMember(room_id=room.id, user_id=current_user.id))
     db.commit()
     db.refresh(room)
     return room
@@ -77,3 +86,40 @@ async def send_messages(
     await redis.close()
 
     return message
+
+
+@router.get("/stats", response_model=dict)
+def stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    total_rooms = db.execute(select(func.count(Room.id))).scalar_one()
+    my_rooms = db.execute(
+        select(func.count(RoomMember.id)).where(RoomMember.user_id == current_user.id)
+    ).scalar_one()
+    return {
+        "total_rooms": total_rooms,
+        "my_rooms": my_rooms,
+        "max_rooms_per_user": settings.max_rooms_per_user,
+    }
+
+
+@router.get("/{room_id}/members", response_model=list[RoomMemberOut])
+def list_members(
+        room_id: int,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    room =db.get(Room, room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    members = db.execute(
+        select(RoomMember).where(RoomMember.room_id == room.id)
+    ).scalars().all()
+
+    result = []
+    for m in members:
+        result.append(RoomMemberOut(
+            id=m.user_id,
+            username=m.user.username,
+            online=False,
+        ))
+    return result

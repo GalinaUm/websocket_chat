@@ -15,3 +15,10 @@ class RoomOut(BaseModel):
     created_by: int
     created_at: datetime
 
+
+class RoomMemberOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    online: bool

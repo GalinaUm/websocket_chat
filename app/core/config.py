@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "WebSocket Chat"
     database_url: str = "postgresql+psycopg://postgres:1234@localhost:5432/websocket_chat"
     redis_url: str = "redis://127.0.0.1:6379/0"
+    max_rooms_per_user: int = 20
 
 
 settings = Settings()
