@@ -3,11 +3,13 @@ import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import select, func, delete
+from sqlalchemy.orm import joinedload
 
 from app.core.config import settings
 from app.core.security import decode_token
 from app.db import SessionLocal
+from app.models import RoomRequest
 from app.models.message import Message
 from app.models.room import Room
 from app.models.room_member import RoomMember
@@ -60,6 +62,124 @@ async def dispatch(db, current_user: User, room_id: int, msg: dict):
                 for m in messages
             ],
         }
+
+    if mtype == "delete_message":
+        message = db.get(Message, msg["message_id"])
+        room = db.get(Room, room_id)
+        if room is None or message is None or message.room_id != room.id:
+            return "reply", {"type": "error", "detail": "Message not found"}
+        if message.user_id != current_user.id and room.created_by != current_user.id:
+            return "reply", {"type": "error", "detail": "Only author or room creator can delete"}
+        db.delete(message)
+        db.commit()
+        return "broadcast", {"type": "message_deleted", "room_id": room_id, "id": msg["message_id"]}
+
+    if mtype == "get_members":
+        rows = db.execute(
+            select(RoomMember)
+            .options(joinedload(RoomMember.user))
+            .where(RoomMember.room_id == room_id)        ).scalars().all()
+        return "reply", {
+            "type": "members", "members": [
+                    {
+                        "id": r.user_id,
+                        "username": r.user.username
+                    } for r in rows
+                ]
+            }
+
+    if mtype == "get_requests":
+        room = db.get(Room, room_id)
+        if room is None:
+            return "reply", {"type": "error", "detail": "Room not found"}
+        if room.created_by != current_user.id:
+            return "reply", {"type": "error", "detail": "Only room creator can view requests"}
+        rows = db.execute(
+            select(RoomRequest)
+            .options(joinedload(RoomRequest.user))
+            .where(
+                RoomRequest.room_id == room_id,
+                RoomRequest.status == "pending",
+            )
+        ).scalars().all()
+        return "reply", {
+            "type": "requests", "requests": [
+                {
+                    "id": r.id,
+                    "user_id": r.user_id,
+                    "username": r.user.username,
+                    "status": r.status
+                } for r in rows
+            ]
+        }
+
+    if mtype == "approve_request":
+        room = db.get(Room, room_id)
+        if room is None:
+            return "reply", {"type": "error", "detail": "Room not found"}
+        if room.created_by != current_user.id:
+            return "reply", {"type": "error", "detail": "Only room creator can approve"}
+        req = db.get(RoomRequest, msg["request_id"])
+        if req is None or req.room_id != room.id:
+            return "reply", {"type": "error", "detail": "Request not found"}
+        if req.status != "pending":
+            return "reply", {"type": "error", "detail": "Request already processed"}
+        user_count = db.execute(
+            select(func.count(RoomMember.id)).where(RoomMember.user_id == req.user_id)
+        ).scalar_one()
+        if user_count >= settings.max_rooms_per_user:
+            req.status = "rejected"
+            db.commit()
+            return "broadcast", {
+                "type": "request_resolved",
+                "room_id": room_id,
+                "user_id": req.user_id,
+                "username": req.user.username,
+                "status": "rejected"
+            }
+        req.status = "approved"
+        db.add(RoomMember(room_id=room.id, user_id=req.user_id))
+        db.commit()
+        return "broadcast", {
+            "type": "member_joined",
+            "room_id": room_id,
+            "user_id": req.user_id,
+            "username": req.user.username,
+        }
+
+    if mtype == "reject_request":
+        room = db.get(Room, room_id)
+        if room is None:
+            return "reply", {"type": "error", "detail": "Room not found"}
+        if room.created_by != current_user.id:
+            return "reply", {"type": "error", "detail": "Only room creator can reject"}
+        req = db.get(RoomRequest, msg["request_id"])
+        if req is None or req.room_id != room.id:
+            return "reply", {"type": "error", "detail": "Request not found"}
+        if req.status != "pending":
+            return "reply", {"type": "error", "detail": "Request already processed"}
+        req.status = "rejected"
+        db.commit()
+        return "broadcast", {
+            "type": "request_resolved",
+            "room_id": room_id,
+            "user_id": req.user_id,
+            "username": req.user.username,
+            "status": "rejected",
+        }
+
+    if mtype == "delete_room":
+        room = db.get(Room, room_id)
+        if room is None:
+            return "reply", {"type": "error", "detail": "Room not found"}
+        if room.created_by != current_user.id:
+            return "reply", {"type": "error", "detail": "Only room creator can delete"}
+        db.execute(delete(Message).where(Message.room_id == room.id))
+        db.execute(delete(RoomMember).where(RoomMember.room_id == room.id))
+        db.execute(delete(RoomRequest).where(RoomRequest.room_id == room.id))
+        db.delete(room)
+        db.commit()
+        return "broadcast", {"type": "room_deleted", "room_id": room_id}
 
     return "reply", {"type": "error", "detail": f"Unknown message type: {mtype}"}
 

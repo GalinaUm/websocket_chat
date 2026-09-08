@@ -20,6 +20,16 @@ async def client(room_id, username):
             event = json.loads(await ws.recv())
             print(f"[{username}] event:", event)
 
+        await ws.send(json.dumps({"type": "get_members"}))
+        print(f"[{username}] members:", json.loads(await ws.recv()))
+
+        await ws.send(json.dumps({"type": "get_requests"}))
+        print(f"[{username}] requests:", json.loads(await ws.recv()))
+
+        await ws.send(json.dumps({"type": "delete_message", "message_id": 21}))
+        for _ in range(2):
+            print(f"[{username}] delete-event:", json.loads(await ws.recv()))
+
         await asyncio.sleep(0.5)
 
 
