@@ -37,12 +37,7 @@ tests/, test_ws*.py   тесты
 
 ### 1. База данных и Redis
 
-Нужны работающие PostgreSQL и Redis. Дефолтные URL (см. `app/core/config.py`):
-
-```
-DATABASE_URL=postgresql+psycopg://postgres:1234@localhost:5432/websocket_chat
-REDIS_URL=redis://127.0.0.1:6379/0
-```
+Нужны работающие PostgreSQL и Redis. Строки подключения задаются переменными окружения — шаблон в `.env.example` (рабочий файл `.env` в гите игнорируется).
 
 ### 2. Бэкенд
 
@@ -70,14 +65,14 @@ npm run dev
 
 Переменные окружения. Шаблон — `.env.example`, рабочий файл `.env` (в гите игнорируется), оба читаются через pydantic-settings из корня бэкенда:
 
-| Переменная | Дефолт | Описание |
-|---|---|---|
-| `DATABASE_URL` | `postgresql+psycopg://postgres:1234@localhost:5432/websocket_chat` | Подключение к БД |
-| `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis (pub/sub комнат, статусы онлайн) |
-| `MAX_ROOMS_PER_USER` | `20` | Лимит комнат на пользователя |
-| `SECRET_KEY` | `change-me-in-production` | Ключ подписи JWT — **сгенерируйте свой** |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Срок жизни access-токена |
-| `CORS_ORIGINS` | `["http://localhost:5173"]` | Разрешённые origins (JSON-массив) |
+| Переменная | Описание |
+|---|---|
+| `DATABASE_URL` | Подключение к БД |
+| `REDIS_URL` | Redis (pub/sub комнат, статусы онлайн) |
+| `MAX_ROOMS_PER_USER` | Лимит комнат на пользователя |
+| `SECRET_KEY` | Ключ подписи JWT — **сгенерируйте свой** |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Срок жизни access-токена |
+| `CORS_ORIGINS` | Разрешённые origins (JSON-массив) |
 
 ## REST API
 
