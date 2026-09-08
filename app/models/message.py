@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.models.room import Room
+    from app.models.user import User
+
 
 class Message(Base):
     __tablename__ = "messages"
@@ -20,3 +22,4 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     room: Mapped["Room"] = relationship("Room", back_populates="messages")
+    user: Mapped["User"] = relationship("User")

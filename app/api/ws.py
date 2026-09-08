@@ -18,7 +18,7 @@ from app.models.user import User
 router = APIRouter()
 
 
-async def dispatch(db, current_user: User, room_id: int, msg: dict):
+async def dispatch(db, current_user: User, room_id: int, msg: dict, redis):
     mtype = msg.get("type")
 
     if mtype == "send_message":
@@ -48,7 +48,9 @@ async def dispatch(db, current_user: User, room_id: int, msg: dict):
         if room is None:
             return "reply", {"type": "error", "detail": "Room not found"}
         messages = db.execute(
-            select(Message).where(Message.room_id == room.id)
+            select(Message)
+            .options(joinedload(Message.user))
+            .where(Message.room_id == room.id)
         ).scalars().all()
         return "reply", {
             "type": "history",
@@ -56,6 +58,7 @@ async def dispatch(db, current_user: User, room_id: int, msg: dict):
                 {
                     "id": m.id,
                     "user_id": m.user_id,
+                    "username": m.user.username if m.user else "?",
                     "content": m.content,
                     "created_at": m.created_at.isoformat(),
                 }
@@ -78,15 +81,16 @@ async def dispatch(db, current_user: User, room_id: int, msg: dict):
         rows = db.execute(
             select(RoomMember)
             .options(joinedload(RoomMember.user))
-            .where(RoomMember.room_id == room_id)        ).scalars().all()
+            .where(RoomMember.room_id == room_id)
+        ).scalars().all()
+        online_ids = {int(x) for x in await redis.smembers("online_users")}
         return "reply", {
-            "type": "members", "members": [
-                    {
-                        "id": r.user_id,
-                        "username": r.user.username
-                    } for r in rows
-                ]
-            }
+            "type": "members",
+            "members": [
+                {"id": r.user_id, "username": r.user.username, "online": r.user_id in online_ids}
+                for r in rows
+            ],
+        }
 
     if mtype == "get_requests":
         room = db.get(Room, room_id)
@@ -212,8 +216,10 @@ async def ws_room(websocket: WebSocket, room_id: int, token: str = ""):
         return
 
     await websocket.accept()
-
     redis = Redis.from_url(settings.redis_url, decode_responses=True,  protocol=2)
+
+    await redis.sadd("online_users", current_user.id)
+
     pubsub = redis.pubsub()
     channel = f"room:{room_id}"
     await pubsub.subscribe(channel)
@@ -234,7 +240,7 @@ async def ws_room(websocket: WebSocket, room_id: int, token: str = ""):
         while True:
             raw = await websocket.receive_text()
             msg = json.loads(raw)
-            mode, event = await dispatch(db, current_user, room_id, msg)
+            mode, event = await dispatch(db, current_user, room_id, msg, redis)
             if mode == "reply":
                 await websocket.send_text(json.dumps(event))
             else:
@@ -249,6 +255,7 @@ async def ws_room(websocket: WebSocket, room_id: int, token: str = ""):
     except WebSocketDisconnect:
         pass
     finally:
+        await redis.srem("online_users", current_user.id)
         sender_task.cancel()
         listener_task.cancel()
         await pubsub.unsubscribe(channel)
