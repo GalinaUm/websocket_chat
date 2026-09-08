@@ -78,22 +78,43 @@ function openChat(roomId: number) {
         <form id="message-form"><input id="msg" placeholder="Сообщение" required /><button>Отправить</button></form>
       </div>
     `
-    document.querySelector('#message-form')!.addEventListener('submit', async (e) => {
-        e.preventDefault()
-        const content = (document.querySelector('#msg') as HTMLInputElement).value
-        const input = document.querySelector('#msg') as HTMLInputElement
-        input.value = ''
-        await api(`/rooms/${roomId}/messages`, { method: 'POST', body: JSON.stringify({ content }) })
-    })
+
 
     ws = new WebSocket(`ws://${location.host}/ws/rooms/${roomId}?token=${token}`)
+
+    ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'get_messages' })
+    }
+
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data)
-        const box = document.querySelector('#messages')!
-        const div = document.createElement('div')
-        div.textContent = `${data.username}: ${data.content}`
-        box.appendChild(div)
+        if (data.type === 'history') {
+            renderMessages(data.messages)
+        } else if (data.type === 'new_message') {
+            appendMessage(data)
+        } else if (data.type === 'error') {
+            console.error(data.detail)
+        }
     }
+
+    document.querySelector('#message-form')!.addEventListener('submit', async (e) => {
+        e.preventDefault()
+        const input = document.querySelector('#msg') as HTMLInputElement
+        const content = input.value
+        input.value = ''
+        ws.send(JSON.stringify({ type: 'send_message', content})
+    })
 }
 
-showLogin()
+function appendMessage(m: { id: number; username?: string; user_id?: number; content: string }) {
+    const box = document.querySelector('#messages')!
+    const div = document.createElement('div')
+    div textContent = `${m.username ?? `user${m.user_id}`}: ${m.content}`
+    box.appendChild(div)
+}
+
+function renderMessages(messages: { id: number; username?: string; user_id?: number; content: string }[]) {
+    const box = document.querySelector('#messages')!
+    box.innerHTML = ''
+    messages.forEach(appendMessage)
+}
