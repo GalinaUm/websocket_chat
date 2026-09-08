@@ -1,15 +1,19 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, func
+from redis import Redis
+from sqlalchemy import delete, select, func
 from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user
 from app.core.config import settings
 from app.db import get_db
 from app.models import RoomRequest
+from app.models.message import Message
 from app.models.room_member import RoomMember
 from app.models.room import Room
 from app.models.user import User
-from app.schemas.room import RoomCreate, RoomOut
+from app.schemas.room import InviteIn, RoomCreate, RoomOut
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
@@ -55,6 +59,33 @@ def stats(db: Session = Depends(get_db), current_user: User = Depends(get_curren
     }
 
 
+@router.get("/mine", response_model=list[int])
+def my_rooms(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return db.execute(
+        select(RoomMember.room_id).where(RoomMember.user_id == current_user.id)
+    ).scalars().all()
+
+
+@router.get("/unread", response_model=list[dict])
+def unread(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    rows = db.execute(
+        select(RoomMember.room_id, RoomMember.last_read_at, RoomMember.joined_at)
+        .where(RoomMember.user_id == current_user.id)
+    ).all()
+    result = []
+    for room_id, last_read_at, joined_at in rows:
+        base = last_read_at if last_read_at is not None else joined_at
+        count = db.execute(
+            select(func.count(Message.id)).where(
+                Message.room_id == room_id,
+                Message.created_at > base,
+            )
+        ).scalar_one()
+        if count:
+            result.append({"room_id": room_id, "unread": count})
+    return result
+
+
 @router.post("/{room_id}/request", status_code=status.HTTP_201_CREATED)
 def knock(
         room_id: int,
@@ -88,3 +119,59 @@ def knock(
     db.add(request)
     db.commit()
     return request
+
+
+@router.post("/{room_id}/invite", status_code=status.HTTP_201_CREATED)
+def invite(
+        room_id: int,
+        payload: InviteIn,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    room = db.get(Room, room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="Room not found")
+    if room.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Only room creator can invite")
+
+    invited = db.execute(
+        select(User).where(User.username == payload.username)
+    ).scalar_one_or_none()
+    if invited is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    existing = db.execute(
+        select(RoomMember).where(
+            RoomMember.room_id == room.id,
+            RoomMember.user_id == invited.id,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="Already a member")
+
+    user_room_count = db.execute(
+        select(func.count(RoomMember.id)).where(RoomMember.user_id == invited.id)
+    ).scalar_one()
+    if user_room_count >= settings.max_rooms_per_user:
+        raise HTTPException(
+            status_code=400,
+            detail=f"User limited to {settings.max_rooms_per_user} rooms",
+        )
+
+    db.add(RoomMember(room_id=room.id, user_id=invited.id))
+    db.execute(
+        delete(RoomRequest).where(
+            RoomRequest.room_id == room.id,
+            RoomRequest.user_id == invited.id,
+        )
+    )
+    db.commit()
+
+    redis = Redis.from_url(settings.redis_url)
+    redis.publish(f"room:{room_id}", json.dumps({
+        "type": "member_joined",
+        "room_id": room.id,
+        "user_id": invited.id,
+        "username": invited.username,
+    }))
+    return {"room_id": room.id, "username": invited.username}

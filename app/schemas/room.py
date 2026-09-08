@@ -7,6 +7,10 @@ class RoomCreate(BaseModel):
     name: str
 
 
+class InviteIn(BaseModel):
+    username: str
+
+
 class RoomOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

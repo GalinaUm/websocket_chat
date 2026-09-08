@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from redis.asyncio import Redis
@@ -185,6 +186,57 @@ async def dispatch(db, current_user: User, room_id: int, msg: dict, redis):
         db.commit()
         return "broadcast", {"type": "room_deleted", "room_id": room_id}
 
+    if mtype == "leave_room":
+        room = db.get(Room, room_id)
+        if room is None:
+            return "reply", {"type": "error", "detail": "Room not found"}
+        if room.created_by == current_user.id:
+            return "reply", {"type": "error", "detail": "Creator cannot leave, delete room instead"}
+        member = db.execute(
+            select(RoomMember).where(
+                RoomMember.room_id == room.id,
+                RoomMember.user_id == current_user.id,
+            )
+        ).scalar_one_or_none()
+        if member is None:
+            return "reply", {"type": "error", "detail": "Not a member"}
+        db.delete(member)
+        db.commit()
+        return "broadcast", {
+            "type": "member_left",
+            "room_id": room_id,
+            "user_id": current_user.id,
+            "username": current_user.username,
+        }
+
+    if mtype == "typing":
+        return "broadcast", {
+            "type": "typing",
+            "room_id": room_id,
+            "user_id": current_user.id,
+            "username": current_user.username,
+        }
+
+    if mtype == "edit_message":
+        message = db.get(Message, msg["message_id"])
+        room = db.get(Room, room_id)
+        if room is None or message is None or message.room_id != room.id:
+            return "reply", {"type": "error", "detail": "Message not found"}
+        if message.user_id != current_user.id:
+            return "reply", {"type": "error", "detail": "Only author can edit"}
+        content = msg.get("content", "").strip()
+        if not content:
+            return "reply", {"type": "error", "detail": "Message cannot be empty"}
+        message.content = content
+        db.commit()
+        return "broadcast", {
+            "type": "message_edited",
+            "room_id": room_id,
+            "id": message.id,
+            "username": current_user.username,
+            "content": message.content,
+        }
+
     return "reply", {"type": "error", "detail": f"Unknown message type: {mtype}"}
 
 
@@ -215,10 +267,24 @@ async def ws_room(websocket: WebSocket, room_id: int, token: str = ""):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
+    is_member.last_read_at = datetime.now(timezone.utc)
+    db.commit()
+
     await websocket.accept()
     redis = Redis.from_url(settings.redis_url, decode_responses=True,  protocol=2)
 
     await redis.sadd("online_users", current_user.id)
+
+    room = db.get(Room, room_id)
+    await websocket.send_json({
+        "type": "welcome",
+        "my_id": current_user.id,
+        "room": {
+            "id": room.id,
+            "name": room.name,
+            "created_by": room.created_by,
+        },
+    })
 
     pubsub = redis.pubsub()
     channel = f"room:{room_id}"
