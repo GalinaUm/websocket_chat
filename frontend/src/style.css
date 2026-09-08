@@ -34,8 +34,8 @@ input {
 
 button {
   padding: 0.5rem 1rem;
-  background: #89b4fa;
-  color: #1e1e2e;
+  background: #A19EAD;
+  color: #ffffff;
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -44,6 +44,14 @@ button {
 ul { list-style: none; }
 li { padding: 0.5rem; cursor: pointer; }
 li:hover { background: #313244; }
+
+#room-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+#me { color: #89b4fa; font-size: 14px; margin-bottom: 0.5rem; }
+.badge { color: #89b4fa; font-size: 12px; margin-left: 4px; }
+
+#online-count { color: #7f849c; font-size: 13px; }
+.system { color: #7f849c; font-style: italic; font-size: 12px; }
 
 .chat #messages {
   height: 400px;
@@ -57,4 +65,16 @@ li:hover { background: #313244; }
 
 .chat #messages div { padding: 0.25rem 0; }
 
-#error { color: #f38ba8; }
+#error, .error { color: #f38ba8; }
+
+#stats { color: #7f849c; font-size: 14px; margin-bottom: 0.5rem; }
+
+.chat-body { display: flex; gap: 12px; }
+#messages { flex: 1; }
+#messages { width: 200px; border-left: 1px solid #ccc; padding-left: 12px; }
+#members li { font-size: 13px; line-height: 1.6; }
+button.delete-msg, .msg-btn { font-size: 11px; padding: 1px 5px; margin-left: 6px; cursor: pointer; }
+
+.unread-badge { margin-left: 6px; background: #f38ba8; color: #1e1e2e; border-radius: 10px; padding: 0 6px; font-size: 11px; }
+#typing-hint { color: #7f849c; font-style: italic; font-size: 12px; min-height: 1.2em; }
+#messages .msg-text { display: inline-block; max-width: 70%; word-wrap: break-word; }
