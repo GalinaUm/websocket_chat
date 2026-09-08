@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:1234@localhost:5432/websocket_chat"
     redis_url: str = "redis://127.0.0.1:6379/0"
     max_rooms_per_user: int = 20
+    secret_key: str = "change-me-in-production"
+    access_token_expire_minutes: int = 30
+    cors_origins: list[str] = ["http://localhost:5173"]
 
 
 settings = Settings()
