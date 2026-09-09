@@ -1,0 +1,11 @@
+.git
+.idea
+venv
+__pycache__
+*.pyc
+.env
+.pytest_cache
+tests
+node_modules
+frontend/dist
+dump.rdb

@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 
 from app.api import auth, rooms, ws
@@ -20,3 +23,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if dist.is_dir():
+    app.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
