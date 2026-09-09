@@ -167,7 +167,7 @@ def invite(
     )
     db.commit()
 
-    redis = Redis.from_url(settings.redis_url)
+    redis = Redis.from_url(settings.redis_url, protocol=2)
     redis.publish(f"room:{room_id}", json.dumps({
         "type": "member_joined",
         "room_id": room.id,

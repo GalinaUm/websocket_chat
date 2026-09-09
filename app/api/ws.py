@@ -321,10 +321,11 @@ async def ws_room(websocket: WebSocket, room_id: int, token: str = ""):
     except WebSocketDisconnect:
         pass
     finally:
-        await redis.srem("online_users", current_user.id)
+        user_id = current_user.id
         sender_task.cancel()
         listener_task.cancel()
+        db.close()
+        await redis.srem("online_users", user_id)
         await pubsub.unsubscribe(channel)
         await pubsub.close()
         await redis.close()
-        db.close()
